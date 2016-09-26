@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: درگاه پرداخت زرین گیت برای Restrict Content Pro
-Version: 1.1.0
-Requires at least: 3.5
+Version: 3.0.0
+Requires at least: 4.0
 Description: درگاه پرداخت <a href="http://www.zarinpal.com/" target="_blank"> زرین گیت </a> برای افزونه Restrict Content Pro | از سری محصولات وب سایت <a href="http://webforest.ir">وب فارست</a>
 Plugin URI: http://webforest.ir/
 Author: حنّان ابراهیمی ستوده
@@ -32,7 +32,17 @@ if (!class_exists('RCP_ZarinGate') ) {
 				
 		public function ZarinGate_Register_By_HANNANStd($gateways) {
 			global $rcp_options;
-			$gateways['ZarinGate'] = isset($rcp_options['zaringate_name']) ? $rcp_options['zaringate_name'] : __( 'زرین گیت', 'rcp_zaringate');
+			
+			if( version_compare( RCP_PLUGIN_VERSION, '2.1.0', '<' ) ) {
+				$gateways['ZarinGate'] = isset($rcp_options['zaringate_name']) ? $rcp_options['zaringate_name'] : __( 'زرین گیت', 'rcp_zaringate');
+			}
+			else {
+				$gateways['ZarinGate'] = array(
+					'label' => isset($rcp_options['zaringate_name']) ? $rcp_options['zaringate_name'] : __( 'زرین گیت', 'rcp_zaringate'),
+					'admin_label' => isset($rcp_options['zaringate_name']) ? $rcp_options['zaringate_name'] : __( 'زرین گیت', 'rcp_zaringate'),
+				);
+			}
+			
 			return $gateways;
 		}
 
@@ -94,11 +104,19 @@ if (!class_exists('RCP_ZarinGate') ) {
 		}
 		
 		public function ZarinGate_Request_By_HANNANStd($subscription_data) {
+				
+			$new_subscription_id = get_user_meta( $subscription_data['user_id'], 'rcp_subscription_level' , true );
+			if ( !empty( $new_subscription_id )) {
+				update_user_meta( $subscription_data['user_id'], 'rcp_subscription_level_new', $new_subscription_id );
+			}
+			
+			$old_subscription_id = get_user_meta( $subscription_data['user_id'], 'rcp_subscription_level_old' , true );
+			update_user_meta( $subscription_data['user_id'], 'rcp_subscription_level', $old_subscription_id );
 			
 			global $rcp_options;
 			ob_start();
 			$query = isset($rcp_options['zaringate_query_name']) ? $rcp_options['zaringate_query_name'] : 'ZarinGate';
-			$amount = $subscription_data['price'];
+			$amount = str_replace( ',', '', $subscription_data['price']);
 			//fee is just for paygate recurring or ipn gateway ....
 			//$amount = $subscription_data['price'] + $subscription_data['fee']; 
 			$zaringate_payment_data = array(
@@ -156,7 +174,7 @@ if (!class_exists('RCP_ZarinGate') ) {
 	
 			if($result->Status == 100)
 			{	
-				ob_end_flush();
+				
 				ob_end_clean();
 				if (!headers_sent()) {
 					header('Location: https://www.zarinpal.com/pg/StartPay/'.$result->Authority.'/ZarinGate');
@@ -179,10 +197,10 @@ if (!class_exists('RCP_ZarinGate') ) {
 		
 		public function ZarinGate_Verify_By_HANNANStd() {
 			
-			if ( !class_exists('RCP_Payments') )
+			if (!isset($_GET['gateway']))
 				return;
 			
-			if (!isset($_GET['gateway']))
+			if ( !class_exists('RCP_Payments') )
 				return;
 			
 			global $rcp_options, $wpdb, $rcp_payments_db_name;
@@ -199,6 +217,7 @@ if (!class_exists('RCP_ZarinGate') ) {
 			{
 				
 				$user_id 			= $zaringate_payment_data['user_id'];
+				$user_id			= intval($user_id);
 				$subscription_name 	= $zaringate_payment_data['subscription_name'];
 				$subscription_key 	= $zaringate_payment_data['subscription_key'];
 				$amount 			= $zaringate_payment_data['amount'];
@@ -207,12 +226,10 @@ if (!class_exists('RCP_ZarinGate') ) {
 				$subscription_price = intval(number_format( (float) rcp_get_subscription_price( rcp_get_subscription_id( $user_id ) ), 2)) ;
 				*/
 				
-				$subscription_id    = rcp_get_subscription_id( $user_id );
-				$user_data          = get_userdata( $user_id );
+				
 				$payment_method =  isset($rcp_options['zaringate_name']) ? $rcp_options['zaringate_name'] : __( 'زرین گیت', 'rcp_zaringate');
 				
-				if( ! $user_data || ! $subscription_id || ! rcp_get_subscription_details( $subscription_id ) )
-					return;
+
 				
 				$new_payment = 1;
 				if( $wpdb->get_results( $wpdb->prepare("SELECT id FROM " . $rcp_payments_db_name . " WHERE `subscription_key`='%s' AND `payment_type`='%s';", $subscription_key, $payment_method ) ) )
@@ -310,6 +327,10 @@ if (!class_exists('RCP_ZarinGate') ) {
 						$rcp_payments->insert( $payment_data );
 					
 					
+						$new_subscription_id = get_user_meta( $user_id, 'rcp_subscription_level_new' , true );
+						if ( !empty( $new_subscription_id )) {
+							update_user_meta( $user_id, 'rcp_subscription_level', $new_subscription_id );
+						}
 						rcp_set_status( $user_id, 'active' );
 					
 						
@@ -522,6 +543,24 @@ if ( !function_exists('change_cancelled_to_pending_By_HANNANStd')) {
 		if( 'cancelled' == $status )
 			rcp_set_status( $user_id, 'expired' );
 			return true;
+	}
+}
+
+if ( !function_exists('RCP_User_Registration_Data_By_HANNANStd') && !function_exists('RCP_User_Registration_Data') ) {
+	add_filter('rcp_user_registration_data', 'RCP_User_Registration_Data_By_HANNANStd' );	
+	function RCP_User_Registration_Data_By_HANNANStd( $user ) {
+		$old_subscription_id = get_user_meta( $user['id'], 'rcp_subscription_level' , true );
+		if ( !empty( $old_subscription_id )) {
+			update_user_meta( $user['id'], 'rcp_subscription_level_old', $old_subscription_id );
+		}
+					
+		$user_info = get_userdata($user['id']);
+		$old_user_role = implode(', ', $user_info->roles);
+		if ( !empty( $old_user_role )) {
+			update_user_meta( $user['id'], 'rcp_user_role_old', $old_user_role );
+		}
+	
+		return $user;
 	}
 }
 ?>
